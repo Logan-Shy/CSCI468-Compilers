@@ -1,4 +1,4 @@
 #ignore anything in .antlr folder
 .antlr
-.interp
-.tokens
+*.interp
+*.tokens
