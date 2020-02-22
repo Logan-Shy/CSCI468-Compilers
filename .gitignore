@@ -2,3 +2,8 @@
 .antlr
 *.interp
 *.tokens
+*.class
+LittleListener.java
+LittleBaseListener.java
+*Lexer.*
+*Parser.*
