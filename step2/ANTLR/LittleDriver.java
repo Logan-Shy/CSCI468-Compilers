@@ -36,6 +36,8 @@ public class LittleDriver {
         //Construct parser and feed in lexer stream
         LittleParser parser = new LittleParser(tokenStream);
 
+        parser.removeErrorListeners();
+
         parser.program();
 
 
