@@ -13,13 +13,12 @@ import static org.antlr.v4.runtime.CharStreams.fromFileName;
 
 // Steps to run Lexical Analyzer:
 // 1. 'antlr4 Little.g4' (this will generate Little.java)
-// 2. 'javac Little*.java' (this compiles generated file with driver)
-// 3. 'java LittleDriver ./path/to/input/file name_of_output.out' (this runs the driver)
+// 2. 'javac Little*.java' (this compiles generated files with driver)
+// 3. 'java LittleDriver ./path/to/input/file' (this runs the driver)
 
 public class LittleDriver {
     public static void main(String[] args) throws Exception {
         ////A relative file path to a .micro file should be passed
-        ////as a command line argument when running this driver file
         ////Example: 'java LittleDriver ../inputs/test1.micro
         String filePath = args[0];
 
@@ -38,12 +37,12 @@ public class LittleDriver {
         //Remove error listener
         parser.removeErrorListeners();
 
-        //program is the start production, so calling it invokes the parsing
+        //'program' is the start production, so calling it invokes the parsing
         parser.program();
 
 
         //gather total errors when finished parsing
-        //if any exist, print not accepted.
+        //if none exist, print accepted, else print not accepted
         int totalErrors = parser.getNumberOfSyntaxErrors();
         if(totalErrors == 0){
             System.out.println("Accepted\n");
