@@ -8,4 +8,4 @@ echo "compiling generated files..."
 javac Little*.java
 
 echo "executing driver file with given argument..."
-java LittleDriver $1
+java LittleDriver "$1"
