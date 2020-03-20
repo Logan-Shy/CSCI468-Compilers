@@ -79,6 +79,13 @@ class MyLittleListener extends LittleBaseListener{
     }
 
     @Override
+    public void exitString_decl(LittleParser.String_declContext ctx){
+        HashMap<String,String> scope = this.scopeStack.peek();//get current scope
+        //add string identifier/value pair to current scope table
+        scope.put(ctx.id().getStart().getText(), ctx.str().getStart().getText());
+    }
+
+    @Override
     public void enterFunc_decl(LittleParser.Func_declContext ctx){
         //todo
     }
