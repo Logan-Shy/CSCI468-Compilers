@@ -40,26 +40,46 @@ public class LittleDriver {
         MyLittleListener listener = new MyLittleListener();
 
         new ParseTreeWalker().walk(listener, parser.program());
+
+        Stack<HashMap<String,String>> s = listener.getSymbolTable();
  
+        System.out.println("Final symbol table: \n" + s);
     }
 }
 
 class MyLittleListener extends LittleBaseListener{
     // Init new symbole table
     int blockIter = 0;
-    Stack<HashMap> scopeStack = new Stack<HashMap>();
+    Stack<HashMap<String,String>> scopeStack = new Stack<HashMap<String,String>>();
+
+    public Stack<HashMap<String,String>> getSymbolTable(){
+        return this.scopeStack;
+    }
 
 
     @Override
     public void enterProgram(LittleParser.ProgramContext ctx){
-        System.out.println("Just entered Program!");
         HashMap<String, String> GLOBAL = new HashMap<String, String>();
-        GLOBAL.put("scope", "GLOBAL");
+        GLOBAL.put("scope", "GLOBAL");//create and add global scope to scopestack
         this.scopeStack.push(GLOBAL);
     }
 
     @Override
     public void exitVar_decl(LittleParser.Var_declContext ctx){
-        System.out.println("Rule Text: " + ctx.getText());
+        String type = ctx.var_type().getStart().getText();
+        HashMap<String, String> scope = this.scopeStack.peek();//get current scope
+        LittleParser.Id_tailContext commaCtx = ctx.id_list().id_tail();
+        //put first var id into table
+        scope.put(ctx.id_list().getStart().getText(), type);
+        while(commaCtx.getStart().getText().contains(",")){
+            //get next variable id's if any exist
+            scope.put(commaCtx.id().getStart().getText(), type);
+            commaCtx = commaCtx.id_tail();
+        }
+    }
+
+    @Override
+    public void enterFunc_decl(LittleParser.Func_declContext ctx){
+        //todo
     }
 }
