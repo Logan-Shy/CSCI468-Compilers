@@ -41,7 +41,7 @@ public class LittleDriver {
 
         new ParseTreeWalker().walk(listener, parser.program());
 
-        Stack<HashMap<String,String>> s = listener.getSymbolTable();
+        LinkedHashMap<String, LinkedHashMap<String, String>> s = listener.getSymbolTable();
  
         System.out.println("Final symbol table: \n" + s);
     }
@@ -49,25 +49,95 @@ public class LittleDriver {
 
 class MyLittleListener extends LittleBaseListener{
     // Init new symbole table
-    int blockIter = 0;
-    Stack<HashMap<String,String>> scopeStack = new Stack<HashMap<String,String>>();
+    int blockIter = 1;
+    Stack<LinkedHashMap<String,String>> scopeStack = new Stack<LinkedHashMap<String,String>>();
+    LinkedHashMap<String, LinkedHashMap<String,String>> finalTable = new LinkedHashMap<String, LinkedHashMap<String,String>>();
 
-    public Stack<HashMap<String,String>> getSymbolTable(){
-        return this.scopeStack;
+    public LinkedHashMap<String, LinkedHashMap<String, String>> getSymbolTable(){
+        return this.finalTable;
     }
 
-
+    ///////// These functions create, push and pop symbol tables as new scope is entered
     @Override
     public void enterProgram(LittleParser.ProgramContext ctx){
-        HashMap<String, String> GLOBAL = new HashMap<String, String>();
-        GLOBAL.put("scope", "GLOBAL");//create and add global scope to scopestack
+        LinkedHashMap<String, String> GLOBAL = new LinkedHashMap<String, String>();
+        //create and add global scope to scopestack
         this.scopeStack.push(GLOBAL);
     }
 
     @Override
+    public void exitProgram(LittleParser.ProgramContext ctx){
+        //pop global symbol table from scope stack and add to final table 
+        this.finalTable.put("GLOBAL", this.scopeStack.pop());
+    }
+
+
+    @Override
+    public void enterFunc_decl(LittleParser.Func_declContext ctx){
+        LinkedHashMap<String, String> funcScope = new LinkedHashMap<String, String>();
+        // funcScope.put("scope", ctx.id().getStart().getText());//create and add function scope to scopestack
+        this.scopeStack.push(funcScope);
+    }
+
+    @Override
+    public void exitFunc_decl(LittleParser.Func_declContext ctx){
+        //remove now complete function table from scopestack and add to final table
+        this.finalTable.put(ctx.id().getStart().getText(), this.scopeStack.pop());
+    }
+
+
+    @Override
+    public void enterWhile_stmt(LittleParser.While_stmtContext ctx){
+        LinkedHashMap<String, String> whileScope = new LinkedHashMap<String, String>();
+        //create and add while loop scope to scopestack
+        this.scopeStack.push(whileScope);
+    }
+
+    @Override
+    public void exitWhile_stmt(LittleParser.While_stmtContext ctx){
+        this.finalTable.put("BLOCK " + this.blockIter++, this.scopeStack.pop());
+    }
+
+
+    @Override
+    public void enterIf_stmt(LittleParser.If_stmtContext ctx){
+        LinkedHashMap<String, String> thenScope = new LinkedHashMap<String, String>();
+        //create and add then block scope to scopestack
+        this.scopeStack.push(thenScope);
+    }
+
+    public void exitIf_stmt(LittleParser.If_stmtContext ctx){
+        if(!(ctx.else_part().getChildCount() > 0)){//pop then block scope since if_else did not
+            this.finalTable.put("BLOCK " + this.blockIter++, this.scopeStack.pop());
+        }
+    }
+
+
+    public void enterElse_part(LittleParser.Else_partContext ctx){
+        if(ctx.getChildCount() > 0){
+            //Pop previous then scope block
+            this.finalTable.put("BLOCK " + this.blockIter++, this.scopeStack.pop());
+            LinkedHashMap<String, String> elseScope = new LinkedHashMap<String, String>();
+            //create and add else block scope to scopestack
+            this.scopeStack.push(elseScope);
+        }
+    }
+
+    public void exitElse_part(LittleParser.Else_partContext ctx){
+        if(ctx.getChildCount() > 0){
+            this.finalTable.put("BLOCK " + this.blockIter++, this.scopeStack.pop());
+        }
+    }
+
+
+
+
+    //TO-DO: add error handling for variable declaration duplication
+    ///////////////These functions watch for variable declaration and add to its current symbol table
+    @Override
     public void exitVar_decl(LittleParser.Var_declContext ctx){
         String type = ctx.var_type().getStart().getText();
-        HashMap<String, String> scope = this.scopeStack.peek();//get current scope
+        LinkedHashMap<String, String> scope = this.scopeStack.peek();//get current scope
         LittleParser.Id_tailContext commaCtx = ctx.id_list().id_tail();
         //put first var id into table
         scope.put(ctx.id_list().getStart().getText(), type);
@@ -80,13 +150,16 @@ class MyLittleListener extends LittleBaseListener{
 
     @Override
     public void exitString_decl(LittleParser.String_declContext ctx){
-        HashMap<String,String> scope = this.scopeStack.peek();//get current scope
+        LinkedHashMap<String,String> scope = this.scopeStack.peek();//get current scope
         //add string identifier/value pair to current scope table
         scope.put(ctx.id().getStart().getText(), ctx.str().getStart().getText());
     }
 
+
     @Override
-    public void enterFunc_decl(LittleParser.Func_declContext ctx){
-        //todo
+    public void exitParam_decl(LittleParser.Param_declContext ctx){
+        LinkedHashMap<String,String> scope = this.scopeStack.peek();//get current scope
+        //add function integer name/type pair to current scope table
+        scope.put(ctx.id().getStart().getText(), ctx.var_type().getStart().getText());
     }
 }
