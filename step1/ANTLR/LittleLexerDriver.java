@@ -11,43 +11,56 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 
 import org.antlr.v4.runtime.*;
-
+import static org.antlr.v4.runtime.CharStreams.fromFileName;
 
 // Steps to run Lexical Analyzer:
 // 1. 'antlr4 LittleLexer.g4' (this will generate LittleLexer.java)
 // 2. 'javac LittleLexer*.java' (this compiles generated file with driver)
-// 3. 'java LittleLexerDriver ./path/to/input/file name_of_output.out' (this runs the driver)
+// 3. 'java LittleLexerDriver ./path/to/input/file' (this runs the driver)
 
 public class LittleLexerDriver {
   public static void main(String[] args) throws Exception {
     ////A relative file path to a .micro file should be passed
     ////as a command line argument when running this driver file,
     ////along with a name for the output file.
-    ////Example: 'java LittleLexerDriver ../inputs/fibonacci.micro fibonacci.out'
+    ////Example: 'java LittleLexerDriver ../inputs/fibonacci.micro'
     String filePath = args[0];
-    String outputFile = args[1];
-    String src = fileToString(filePath);
-    LittleLexer lexer = new LittleLexer(new ANTLRInputStream(src));
-    
-    try {
-        PrintWriter pw = new PrintWriter(new FileWriter(outputFile));
-        String tempStr;
+    CharStream fileStream = fromFileName(filePath);
+    LittleLexer lexer = new LittleLexer(fileStream);
+    String tempStr;
 
-        while(true) {
-            tempStr = "";
-            Token token = lexer.nextToken();
-            if(token.getType() == LittleLexer.EOF) {
-              break;
-            }
-            tempStr += ("Token Type: " + indexToToken(token.getType()) + "\n");
-            tempStr += ("Value: " + token.getText() + "\n");
-            //System.out.println(token.getType() + " :: " + token.getText());
-            pw.write(tempStr);
+    while(true) {
+        tempStr = "";
+        Token token = lexer.nextToken();
+        if(token.getType() == LittleLexer.EOF) {
+          break;
         }
-        pw.close();
-    } catch (IOException e) {
-        e.printStackTrace();
+        tempStr += ("Token Type: " + indexToToken(token.getType())+"\n");
+        tempStr += ("Value: " + token.getText());
+        //System.out.println(token.getType() + " :: " + token.getText());
+        // pw.write(tempStr);
+        System.out.println(tempStr);
     }
+
+    // try {
+    //     PrintWriter pw = new PrintWriter(new FileWriter(outputFile));
+    //     String tempStr;
+
+    //     while(true) {
+    //         tempStr = "";
+    //         Token token = lexer.nextToken();
+    //         if(token.getType() == LittleLexer.EOF) {
+    //           break;
+    //         }
+    //         tempStr += ("Token Type: " + indexToToken(token.getType()) + "\n");
+    //         tempStr += ("Value: " + token.getText() + "\n");
+    //         //System.out.println(token.getType() + " :: " + token.getText());
+    //         pw.write(tempStr);
+    //     }
+    //     pw.close();
+    // } catch (IOException e) {
+    //     e.printStackTrace();
+    // }
     
   
 }
