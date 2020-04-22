@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 
+import javax.management.RuntimeErrorException;
 import javax.sound.sampled.SourceDataLine;
 
 import org.antlr.v4.runtime.tree.ParseTreeWalker;
@@ -20,6 +21,24 @@ import static org.antlr.v4.runtime.CharStreams.fromFileName;
 // 1. exectue micro.sh script
 
 public class LittleDriver {
+
+    public static void prettyPrint(LinkedHashMap<String, LinkedHashMap<String, String>> finalTable){
+        if(!(finalTable.containsKey("DECLARATION ERROR"))){
+            //print off individual linkedhashmaps
+            finalTable.forEach((k,v) -> {
+                if(k != "GLOBAL"){
+                    System.out.println();
+                }
+                System.out.println("Symbol table " + k);
+                v.forEach((var, type) -> {
+                    System.out.println("name " + var + " type " + type);
+                });
+            });
+        } else {//print off var that errored
+            String errorVar = finalTable.get("DECLARATION ERROR").get("error");
+            System.out.println("DECLARATION ERROR " + errorVar);
+        }
+    }
 
     public static void main(String[] args) throws Exception {
         ////A relative file path to a .micro file should be passed
@@ -38,28 +57,38 @@ public class LittleDriver {
         //Construct parser and feed in lexer stream
         LittleParser parser = new LittleParser(tokenStream);
         
+        //Initialize inheriting listener
         MyLittleListener listener = new MyLittleListener();
 
+        //Walk the generated parse tree
         new ParseTreeWalker().walk(listener, parser.program());
+        
+        //Get the final symbol table from listener and print
+        LinkedHashMap<String, LinkedHashMap<String, String>> s = listener.getSymbolTable();
+        prettyPrint(s);
 
-    }
-}
+        System.out.println("\nAST Nodes:");
+        while(!listener.nodePool.empty()){
+            AstNode.Print(listener.nodePool.pop());
+            System.out.println("-----------------");
+        }
 
-class AST{
-    AstNode head;
-    
-    public AST(AstNode head){
-        this.head = head;
     }
 }
 
 class AstNode{
+
+    String type;
+    String[] data = new String[2];
+
     AstNode Lchild;
     AstNode Rchild;
 
-    public AstNode(AstNode Lchild, AstNode Rchild){
+    public AstNode(AstNode Lchild, AstNode Rchild, String type, String[] data){
         this.Lchild = Lchild;
         this.Rchild = Rchild;
+        this.type = type;
+        this.data = data;
     }
 
     public AstNode[] GetChildren(){
@@ -82,10 +111,181 @@ class AstNode{
     public void SetRightChild(AstNode newChild){
         this.Rchild = newChild;
     }
+
+    public static void Print(AstNode head){
+        
+        if(head != null){
+            Print(head.Lchild);
+            Print(head.Rchild);
+            if(head.type != null){
+                System.out.println("Type: " + head.type);
+            }
+            if(head.data != null){
+                System.out.println("Data: " + "[" + head.data[0] + ", " + head.data[1] + "]");
+            }
+            System.out.println();
+        }
+    }
 }
 
-class MyLittleListener extends LittleBaseListener{
 
+class MyLittleListener extends LittleBaseListener{
+    
+    Stack<AstNode> nodePool = new Stack<AstNode>();
+    LinkedList<AstNode> treeList = new LinkedList<AstNode>();
+    // Init new symbole table
+    int blockIter = 1;
+    String errorVar = "";
+    Stack<LinkedHashMap<String,String>> scopeStack = new Stack<LinkedHashMap<String,String>>();
+    LinkedHashMap<String, LinkedHashMap<String,String>> finalTable = new LinkedHashMap<String, LinkedHashMap<String,String>>();
+
+    public LinkedHashMap<String, LinkedHashMap<String, String>> getSymbolTable(){
+        if(this.errorVar.isEmpty()){//check if any declaration errors occurred
+            return this.finalTable;
+        } else {
+            LinkedHashMap<String,String> error = new LinkedHashMap<String,String>();
+            LinkedHashMap<String, LinkedHashMap<String,String>> errorTable = new LinkedHashMap<String, LinkedHashMap<String,String>>();
+            error.put("error", this.errorVar);
+            errorTable.put("DECLARATION ERROR", error);
+            return errorTable;
+        }
+    }
+
+    ///////// These functions handle AST generation \\\\\\\\\\\\\\\
+    @Override
+    public void exitAddop(LittleParser.AddopContext ctx){
+        //get symbol table for type reference
+        if (ctx.getStart().getText().contains("+")){
+            AstNode addop = new AstNode(null, null, "AddExpr(+)", null);
+            this.nodePool.push(addop);
+        } else if(ctx.getStart().getText().contains("-")){
+            AstNode addop = new AstNode(null, null, "AddExpr(-)", null);
+            this.nodePool.push(addop);
+        }
+    }
+
+    @Override
+    public void exitFactor(LittleParser.FactorContext ctx){
+        LinkedHashMap<String,String> symbolTable = this.finalTable.get("GLOBAL");
+        if(ctx.factor_prefix().getChildCount() <= 0){//no factor prefix, so just var/literal usage.
+            if (ctx.postfix_expr().primary().id() == null){//String or int literal
+                String literal = ctx.postfix_expr().primary().getStart().getText();
+                if(literal.contains(".")){
+                    //float literal
+                    AstNode lit = new AstNode(null, null, "FloatLiteral", new String[] {literal, "FLOAT"});
+                    this.nodePool.push(lit);
+                } else{
+                    //int literal
+                    AstNode lit = new AstNode(null, null, "IntLiteral", new String[] {literal, "INT"});
+                    this.nodePool.push(lit);
+                }
+            } else{
+                //variable reference
+                String varId = ctx.postfix_expr().primary().id().getStart().getText();
+                String varType = symbolTable.get(varId);
+                AstNode var = new AstNode(null, null, "VarRef", new String[] {varId, varType});
+                this.nodePool.push(var);
+            }
+
+        }
+    }
+
+    @Override
+    public void exitExpr_prefix(LittleParser.Expr_prefixContext ctx){
+        if(ctx.getChildCount() > 0){//Check rule is not empty
+            if(ctx.expr_prefix().getChildCount() <= 0){//no expr_prefix
+                AstNode addop = this.nodePool.pop();
+                AstNode factorVar = this.nodePool.pop();
+                // Debugging for correct stack behaviour
+                // System.out.println("Addop: " + addop.type);
+                // System.out.println("FactorVar: " + factorVar.type);
+                addop.Lchild = factorVar;
+                this.nodePool.push(addop);
+            } else if(ctx.getChildCount() > 2){//all nodes available
+                System.out.println("nothing seems to work");
+            }
+        }
+    }
+
+
+    ///////// These functions create, push and pop symbol tables as new scope is entered
+    @Override
+    public void enterProgram(LittleParser.ProgramContext ctx){
+        LinkedHashMap<String, String> GLOBAL = new LinkedHashMap<String, String>();
+        //create and add global scope to scopestack and to final table
+        this.scopeStack.push(GLOBAL);
+        this.finalTable.put("GLOBAL", this.scopeStack.peek());
+    }
+
+    @Override
+    public void exitProgram(LittleParser.ProgramContext ctx){
+        //pop global symbol table from scope stack 
+        this.scopeStack.pop();
+    }
+
+
+    @Override
+    public void enterFunc_decl(LittleParser.Func_declContext ctx){
+        LinkedHashMap<String, String> funcScope = new LinkedHashMap<String, String>();
+        //create and add function scope to scopestack and to final table
+        this.scopeStack.push(funcScope);
+        this.finalTable.put(ctx.id().getStart().getText(), this.scopeStack.peek());
+    }
+
+    @Override
+    public void exitFunc_decl(LittleParser.Func_declContext ctx){
+        //remove now complete function table from scopestack
+        this.scopeStack.pop();
+    }
+
+
+    @Override
+    public void enterWhile_stmt(LittleParser.While_stmtContext ctx){
+        LinkedHashMap<String, String> whileScope = new LinkedHashMap<String, String>();
+        //create and add while loop scope to scopestack and to final table
+        this.scopeStack.push(whileScope);
+        this.finalTable.put("BLOCK " + this.blockIter++, this.scopeStack.peek());
+    }
+
+    @Override
+    public void exitWhile_stmt(LittleParser.While_stmtContext ctx){
+        this.scopeStack.pop();
+    }
+
+
+    @Override
+    public void enterIf_stmt(LittleParser.If_stmtContext ctx){
+        LinkedHashMap<String, String> thenScope = new LinkedHashMap<String, String>();
+        //create and add then block scope to scopestack and to final table
+        this.scopeStack.push(thenScope);
+        this.finalTable.put("BLOCK " + this.blockIter++, this.scopeStack.peek());
+    }
+
+    @Override
+    public void exitIf_stmt(LittleParser.If_stmtContext ctx){
+        if(!(ctx.else_part().getChildCount() > 0)){//pop then block scope since if_else did not
+            this.scopeStack.pop();
+        }
+    }
+
+    @Override
+    public void enterElse_part(LittleParser.Else_partContext ctx){
+        if(ctx.getChildCount() > 0){
+            //Pop previous then scope block
+            this.scopeStack.pop();
+            //create and add else block scope to scopestack and to final table
+            LinkedHashMap<String, String> elseScope = new LinkedHashMap<String, String>();
+            this.scopeStack.push(elseScope);
+            this.finalTable.put("BLOCK " + this.blockIter++, this.scopeStack.peek());
+        }
+    }
+
+    @Override
+    public void exitElse_part(LittleParser.Else_partContext ctx){
+        if(ctx.getChildCount() > 0){// pop else block scope from scope stack
+            this.scopeStack.pop();
+        }
+    }
 
     ///////////////These functions watch for variable declaration and add to its current symbol table
     @Override
