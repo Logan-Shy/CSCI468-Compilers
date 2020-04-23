@@ -64,12 +64,17 @@ public class LittleDriver {
         new ParseTreeWalker().walk(listener, parser.program());
         
         //Get the final symbol table from listener and print
-        LinkedHashMap<String, LinkedHashMap<String, String>> s = listener.getSymbolTable();
-        prettyPrint(s);
+        // LinkedHashMap<String, LinkedHashMap<String, String>> s = listener.getSymbolTable();
+        // prettyPrint(s);
 
         System.out.println("\nAST Nodes:");
         while(!listener.nodePool.empty()){
             AstNode.Print(listener.nodePool.pop());
+            System.out.println("-----------------");
+        }
+        System.out.println("\nFinal Trees: ");
+        while(!listener.treeList.isEmpty()){
+            AstNode.Print(listener.treeList.removeFirst());
             System.out.println("-----------------");
         }
 
@@ -115,8 +120,6 @@ class AstNode{
     public static void Print(AstNode head){
         
         if(head != null){
-            Print(head.Lchild);
-            Print(head.Rchild);
             if(head.type != null){
                 System.out.println("Type: " + head.type);
             }
@@ -124,6 +127,14 @@ class AstNode{
                 System.out.println("Data: " + "[" + head.data[0] + ", " + head.data[1] + "]");
             }
             System.out.println();
+            if(head.Lchild != null){
+                System.out.println("Left...");
+                Print(head.Lchild);
+            }
+            if(head.Rchild != null){
+                System.out.println("Right...");
+                Print(head.Rchild);
+            }
         }
     }
 }
@@ -154,7 +165,7 @@ class MyLittleListener extends LittleBaseListener{
     ///////// These functions handle AST generation \\\\\\\\\\\\\\\
     @Override
     public void exitAddop(LittleParser.AddopContext ctx){
-        //get symbol table for type reference
+        //Add correct node depending on text of addop
         if (ctx.getStart().getText().contains("+")){
             AstNode addop = new AstNode(null, null, "AddExpr(+)", null);
             this.nodePool.push(addop);
@@ -164,20 +175,38 @@ class MyLittleListener extends LittleBaseListener{
         }
     }
 
+    @Override 
+    public void exitMulop(LittleParser.MulopContext ctx){
+        //Add correct node depending on text of mulop
+        if(ctx.getStart().getText().contains("*")){
+            AstNode mulop = new AstNode(null, null, "MulExpr(*)", null);
+            this.nodePool.push(mulop);
+        } else if(ctx.getStart().getText().contains("/")){
+            AstNode mulop = new AstNode(null, null, "MulExpr(/)", null);
+            this.nodePool.push(mulop);
+        }
+    }
+
     @Override
     public void exitFactor(LittleParser.FactorContext ctx){
         LinkedHashMap<String,String> symbolTable = this.finalTable.get("GLOBAL");
-        if(ctx.factor_prefix().getChildCount() <= 0){//no factor prefix, so just var/literal usage.
-            if (ctx.postfix_expr().primary().id() == null){//String or int literal
-                String literal = ctx.postfix_expr().primary().getStart().getText();
-                if(literal.contains(".")){
-                    //float literal
-                    AstNode lit = new AstNode(null, null, "FloatLiteral", new String[] {literal, "FLOAT"});
-                    this.nodePool.push(lit);
+        if(ctx.factor_prefix().getChildCount() <= 0){//no factor prefix, so just var/literal/expr usage.
+            if (ctx.postfix_expr().primary().id() == null){//int literal or expr
+                if(ctx.postfix_expr().primary().expr() == null){
+                    //Literal
+                    String literal = ctx.postfix_expr().primary().getStart().getText();
+                    if(literal.contains(".")){
+                        //float literal
+                        AstNode lit = new AstNode(null, null, "FloatLiteral", new String[] {literal, "FLOAT"});
+                        this.nodePool.push(lit);
+                    } else{
+                        //int literal
+                        AstNode lit = new AstNode(null, null, "IntLiteral", new String[] {literal, "INT"});
+                        this.nodePool.push(lit);
+                    }
                 } else{
-                    //int literal
-                    AstNode lit = new AstNode(null, null, "IntLiteral", new String[] {literal, "INT"});
-                    this.nodePool.push(lit);
+                    //Expression, whose node should have been taken care of by expr().
+                    //No need to push anything.
                 }
             } else{
                 //variable reference
@@ -187,6 +216,125 @@ class MyLittleListener extends LittleBaseListener{
                 this.nodePool.push(var);
             }
 
+        } else if(ctx.factor_prefix().getChildCount() > 0){
+            //factor prefix exists
+            if(ctx.postfix_expr().primary().id() == null){//literal or expression
+                if(ctx.postfix_expr().primary().expr() == null){
+                    //literal
+                    AstNode factorPrefixVar = this.nodePool.pop(); 
+                    String literal = ctx.postfix_expr().primary().getStart().getText();
+                    if(literal.contains(".")){
+                        //float literal
+                        AstNode lit = new AstNode(null, null, "FloatLiteral", new String[] {literal, "FLOAT"});
+                        factorPrefixVar.Rchild = lit;
+                        this.nodePool.push(factorPrefixVar);
+                    } else{
+                        //int literal
+                        AstNode lit = new AstNode(null, null, "IntLiteral", new String[] {literal, "INT"});
+                        factorPrefixVar.Rchild = lit;
+                        this.nodePool.push(factorPrefixVar);
+                    }
+                } else{
+                    //expression
+                    AstNode exprNode = this.nodePool.pop();
+                    AstNode factorPrefixVar = this.nodePool.pop();
+
+                    factorPrefixVar.Rchild = exprNode;
+                    this.nodePool.push(factorPrefixVar);
+                }
+            } else {//variable reference
+                AstNode factorPrefixVar = this.nodePool.pop(); 
+                String varId = ctx.postfix_expr().primary().id().getStart().getText();
+                String varType = symbolTable.get(varId);
+                AstNode var = new AstNode(null, null, "VarRef", new String[] {varId, varType});
+                
+                factorPrefixVar.Rchild = var;
+                this.nodePool.push(factorPrefixVar);
+            }
+        }
+    }
+
+    @Override 
+    public void exitFactor_prefix(LittleParser.Factor_prefixContext ctx){
+        //Get current symbol table
+        LinkedHashMap<String,String> symbolTable = this.finalTable.get("GLOBAL");
+        if(ctx.getChildCount() > 0){//Check rule is not empty
+            // System.out.println("\nWe got children\n");
+            if(ctx.factor_prefix().getChildCount() > 0){//includes another factor prefix
+                if(ctx.postfix_expr().primary().id() == null){//literal or expression
+                    if(ctx.postfix_expr().primary().expr() == null){
+                        //Literal
+                        AstNode mulop = this.nodePool.pop();
+                        AstNode mulopVar = this.nodePool.pop();
+                        String literal = ctx.postfix_expr().primary().getStart().getText();
+                        if(literal.contains(".")){
+                            //float literal
+                            AstNode lit = new AstNode(null, null, "FloatLiteral", new String[] {literal, "FLOAT"});
+                            mulopVar.Rchild = lit;
+                            mulop.Lchild = mulopVar;
+                            this.nodePool.push(mulop);
+                        } else{
+                            //int literal
+                            AstNode lit = new AstNode(null, null, "IntLiteral", new String[] {literal, "INT"});
+                            mulopVar.Rchild = lit;
+                            mulop.Lchild = mulopVar;
+                            this.nodePool.push(mulop);
+                        }
+                    } else {
+                        //expression
+                        AstNode mulop = this.nodePool.pop();
+                        AstNode exprNode = this.nodePool.pop();
+                        AstNode mulopVar = this.nodePool.pop();
+                        
+                        mulopVar.Rchild = exprNode;
+                        mulop.Lchild = mulopVar;
+                        this.nodePool.push(mulop);
+                    }
+                } else{
+                    //variable reference
+                    AstNode mulop = this.nodePool.pop();
+                    AstNode mulopVar = this.nodePool.pop();
+                    String varId = ctx.postfix_expr().primary().id().getStart().getText();
+                    String varType = symbolTable.get(varId);
+                    AstNode var = new AstNode(null, null, "VarRef", new String[] {varId, varType});
+                    mulopVar.Rchild = var;
+                    mulop.Lchild = mulopVar;
+                    this.nodePool.push(mulop);
+                }
+            } else{//No extra factor prefix
+                AstNode mulop = this.nodePool.pop();
+                
+                if(ctx.postfix_expr().primary().id() == null){//literal or expression
+                    //Literal
+                    if(ctx.postfix_expr().primary().expr() == null){
+                        String literal = ctx.postfix_expr().primary().getStart().getText();
+                        if(literal.contains(".")){
+                            //float literal
+                            AstNode lit = new AstNode(null, null, "FloatLiteral", new String[] {literal, "FLOAT"});
+                            mulop.Lchild = lit;
+                            this.nodePool.push(mulop);
+                        } else{
+                            //int literal
+                            AstNode lit = new AstNode(null, null, "IntLiteral", new String[] {literal, "INT"});
+                            mulop.Lchild = lit;
+                            this.nodePool.push(mulop);
+                        }
+                    } else {//expression
+                        AstNode exprNode = this.nodePool.pop();
+                        // System.out.println("Factor > factor_prefix > postfix_expr > primary > expr: ");
+                        // AstNode.Print(exprNode);
+                        mulop.Lchild = exprNode;
+                        this.nodePool.push(mulop);
+                    }
+                } else{
+                    //variable reference
+                    String varId = ctx.postfix_expr().primary().id().getStart().getText();
+                    String varType = symbolTable.get(varId);
+                    AstNode var = new AstNode(null, null, "VarRef", new String[] {varId, varType});
+                    mulop.Lchild = var;
+                    this.nodePool.push(mulop);
+                }
+            }
         }
     }
 
@@ -196,15 +344,46 @@ class MyLittleListener extends LittleBaseListener{
             if(ctx.expr_prefix().getChildCount() <= 0){//no expr_prefix
                 AstNode addop = this.nodePool.pop();
                 AstNode factorVar = this.nodePool.pop();
-                // Debugging for correct stack behaviour
-                // System.out.println("Addop: " + addop.type);
-                // System.out.println("FactorVar: " + factorVar.type);
                 addop.Lchild = factorVar;
                 this.nodePool.push(addop);
             } else if(ctx.getChildCount() > 2){//all nodes available
-                System.out.println("nothing seems to work");
+                AstNode addop = this.nodePool.pop();
+                AstNode factorVar = this.nodePool.pop();
+                AstNode expr_prefixVar = this.nodePool.pop();
+                
+                expr_prefixVar.Rchild = factorVar;
+                addop.Lchild = expr_prefixVar;
+                this.nodePool.push(addop);
             }
         }
+    }
+
+    @Override
+    public void exitExpr(LittleParser.ExprContext ctx){
+        if(ctx.expr_prefix().getChildCount() == 3 && ctx.factor().getChildCount() == 2){
+            AstNode mulExpr = this.nodePool.pop();
+            AstNode addExpr = this.nodePool.pop();
+            addExpr.Rchild = mulExpr;
+            this.nodePool.push(addExpr);
+        }
+    }
+
+    @Override
+    public void exitAssign_expr(LittleParser.Assign_exprContext ctx){
+        //Get current symbol table
+        LinkedHashMap<String,String> symbolTable = this.finalTable.get("GLOBAL");
+
+        //Get variable name being assigned to and make AST node from it
+        String varId = ctx.id().getStart().getText();
+        String varType = symbolTable.get(varId);
+        AstNode assignId = new AstNode(null,null,"VarRef",new String[] {varId, varType});
+        
+        //Get completed expr node 
+        AstNode exprNode = this.nodePool.pop();
+
+        //Create assignment node and put variable as left child and expression as right
+        AstNode assignNode = new AstNode(assignId, exprNode, "AssignExpr(:=)", null);
+        this.treeList.add(assignNode);
     }
 
 
