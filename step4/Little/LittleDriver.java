@@ -1,47 +1,20 @@
 /*
-    Author: Logan Shy, Chris Erickson, James Jacobs
-
+    Author: Logan Shy
 */
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.FileWriter;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.*;
-
-import javax.management.RuntimeErrorException;
+import java.util.regex.*;
 
 import org.antlr.v4.runtime.tree.ParseTreeWalker;
 import org.antlr.v4.runtime.*;
 import static org.antlr.v4.runtime.CharStreams.fromFileName;
 
 
-// Steps to run parser walker:
-// 1. exectue micro.sh script
-
+// To run code generation, exectue micro.sh script with an input file
 public class LittleDriver {
-
-    public static void prettyPrint(LinkedHashMap<String, LinkedHashMap<String, String>> finalTable){
-        if(!(finalTable.containsKey("DECLARATION ERROR"))){
-            //print off individual linkedhashmaps
-            finalTable.forEach((k,v) -> {
-                if(k != "GLOBAL"){
-                    System.out.println();
-                }
-                System.out.println("Symbol table " + k);
-                v.forEach((var, type) -> {
-                    System.out.println("name " + var + " type " + type);
-                });
-            });
-        } else {//print off var that errored
-            String errorVar = finalTable.get("DECLARATION ERROR").get("error");
-            System.out.println("DECLARATION ERROR " + errorVar);
-        }
-    }
 
     public static void main(String[] args) throws Exception {
         ////A relative file path to a .micro file should be passed
-        ////Example: 'java LittleDriver ../inputs/test1.micro
+        ////Example: 'micro.sh ../inputs/test1.micro
         String filePath = args[0];
 
         //Construct Char stream from file name given via command arguments
@@ -61,35 +34,19 @@ public class LittleDriver {
 
         //Walk the generated parse tree
         new ParseTreeWalker().walk(listener, parser.program());
-        
-        //Get the final symbol table from listener and print
-        // LinkedHashMap<String, LinkedHashMap<String, String>> s = listener.getSymbolTable();
-        // prettyPrint(s);
-
-        System.out.println("\nAST Nodes:");
-        while(!listener.nodePool.empty()){
-            AstNode.Print(listener.nodePool.pop());
-            System.out.println("-----------------");
-        }
-        System.out.println("\nFinal Trees: ");
-        LinkedList<AstNode> printList = new LinkedList<AstNode>();
-        printList = (LinkedList<AstNode>) listener.treeList.clone();
-        while(!printList.isEmpty()){
-            AstNode.Print(printList.removeFirst());
-            System.out.println("-----------------");
-        }
 
         //Generate code
-        System.out.println("\nGenerating Code from trees:");
+        String finalCode = "";
         Stack<CodeObject> codeStack = new Stack<CodeObject>();
         while(!listener.treeList.isEmpty()){
             AstNode.GenerateCode(listener.treeList.removeFirst(), codeStack);
-            while(!codeStack.empty()){//print code object for given AST
-                CodeObject.Print(codeStack.pop());
-                System.out.println("______________________");
+            while(!codeStack.empty()){//concat code from all objects in generated code stack
+                finalCode += codeStack.pop().code;
             }
         }
 
+        //Write final code to console
+        System.out.println(finalCode);
     }
 }
 
@@ -102,12 +59,6 @@ class CodeObject{
         this.temp = temp;
         this.type = type;
         this.code = code;
-    }
-
-    public static void Print(CodeObject o){
-        System.out.println("Temp name: "+ o.temp);
-        System.out.println("Type:"+ o.type);
-        System.out.println("Generated Code:\n" + o.code);
     }
 }
 
@@ -124,48 +75,6 @@ class AstNode{
         this.Rchild = Rchild;
         this.type = type;
         this.data = data;
-    }
-
-    public AstNode[] GetChildren(){
-        AstNode[] nodeArray = {this.Lchild, this.Rchild};
-        return nodeArray;
-    }
-
-    public AstNode GetLeftChild(){
-        return this.Lchild;
-    }
-
-    public AstNode GetRightChild(){
-        return this.Rchild;
-    }
-
-    public void SetLeftChild(AstNode newChild){
-        this.Lchild = newChild;
-    }
-
-    public void SetRightChild(AstNode newChild){
-        this.Rchild = newChild;
-    }
-
-    public static void Print(AstNode head){
-        
-        if(head != null){
-            if(head.type != null){
-                System.out.println("Type: " + head.type);
-            }
-            if(head.data != null){
-                System.out.println("Data: " + "[" + head.data[0] + ", " + head.data[1] + "]");
-            }
-            System.out.println();
-            if(head.Lchild != null){
-                System.out.println("Left...");
-                Print(head.Lchild);
-            }
-            if(head.Rchild != null){
-                System.out.println("Right...");
-                Print(head.Rchild);
-            }
-        }
     }
 
     public static void GenerateCode(AstNode head, Stack<CodeObject> generatedCode){
@@ -191,15 +100,16 @@ class AstNode{
                 if(assignee.code != null){
                     code += assignee.code;
                 }
-                if(assignee.type.contains("INT")){
-                    code += "STOREI" + " " + assignee.temp + " " + assigner.temp + "\n";
-                    typeName = "INT";
-                } else if(assignee.type.contains("FLOAT")){
-                    code += "STOREF" + " " + assignee.temp + " " + assigner.temp + "\n";
-                    typeName = "FLOAT";
+                if(!(Pattern.matches("r[0-9]+", assignee.temp))){//assigning a literal
+                    code += "move " + assignee.temp + " " + tempName + "\n" +
+                            "move " + tempName + " " + assigner.temp + "\n";
+                } else{//assigning expression inside of register
+                    code += "move" + " " + assignee.temp + " " + assigner.temp + "\n";
                 }
+                typeName = assignee.type;
                 CodeObject assignObject = new CodeObject(tempName, typeName, code);
                 generatedCode.push(assignObject);
+
             } else if(head.type.contains("Literal")){//float or int
                 if(head.type.contains("Int")){
                     //create new code object with only two fields filled in
@@ -211,40 +121,41 @@ class AstNode{
                     CodeObject newObject = new CodeObject(head.data[0], "FLOATLIT", null);
                     generatedCode.push(newObject);
                 }
+
             } else if(head.type.contains("VarRef")){//Var Reference
                 CodeObject newObject = new CodeObject(head.data[0], head.data[1], null);
                 generatedCode.push(newObject);
+
             } else if(head.type.contains("AddExpr")){//Add Expression
                 //Generate new temp for name
                 String tempName = CreateTemporary();
                 String typeName = "";
                 String code = "";
+                String addRegister = "";
                 String leftTemp = "[LEFT TEMP NAME]";
                 String rightTemp = "[RIGHT TEMP NAME]";
+
 
                 //Guaranteed two nodes from left and right child to be added
                 CodeObject rightObject = generatedCode.pop();
                 CodeObject leftObject = generatedCode.pop();
 
                 //Left child code generation
-                if(!leftObject.temp.contains("$T") && !leftObject.type.contains("LIT")){//var reference
-                    leftTemp = leftObject.temp;
-                    code += "LD " + leftObject.temp + " " + CreateTemporary() + "\n";
-                } else if(leftObject.type.contains("LIT")){//Int Literal
-                    leftTemp = leftObject.temp;
-                } else if(leftObject.temp.contains("$T")){//expression
+                if(!(Pattern.matches("r[0-9]+", leftObject.temp))){//var reference or literal
+                    addRegister = tempName;
+                    leftTemp = addRegister;
+                    code += "move " + leftObject.temp + " " + addRegister + "\n";
+                } else if(Pattern.matches("r[0-9]+", leftObject.temp)){//expression
                     //load generated code from expression and add to new code
+                    addRegister = tempName;
                     leftTemp = leftObject.temp;
-                    code += leftObject.code;
+                    code += leftObject.code + "move " + leftTemp + " " + addRegister + "\n";
                 }
 
-                //Right Child code generation
-                if(!rightObject.temp.contains("$T") && !rightObject.type.contains("LIT")){//var reference
+                //Right child code generation
+                if(!(Pattern.matches("r[0-9]+", rightObject.temp))){//var reference or literal
                     rightTemp = rightObject.temp;
-                    code += "LD " + rightObject.temp + " " + CreateTemporary() + "\n";
-                } else if(rightObject.type.contains("LIT")){//Int Literal
-                    rightTemp = rightObject.temp;
-                } else if(rightObject.temp.contains("$T")){//expression
+                } else if(Pattern.matches("r[0-9]+", rightObject.temp)){//expression
                     //load generated code from expression and add to new code
                     rightTemp = rightObject.temp;
                     code += rightObject.code;
@@ -254,67 +165,149 @@ class AstNode{
                 //Finalize Add expr Code generation
                 if(head.type.contains("+")){//use Add instruction variant
                     if(leftObject.type.contains("INT")){//Use AddI instruction
-                        code += "ADDI "+ leftTemp +" "+ rightTemp +" "+ tempName +"\n";
+                        code += "addi "+ rightTemp +" "+ addRegister +"\n";
                         typeName = "INT";
                     } else if(leftObject.type.contains("FLOAT")){//Use AddF instruction
-                        code += "ADDF "+ leftTemp +" "+ rightTemp +" "+ tempName +"\n";
+                        code += "addr "+ rightTemp +" "+ addRegister +"\n";
                         typeName = "FLOAT";
                     }
                 } else if(head.type.contains("-")){//Use Sub instruction variant
                     if(leftObject.type.contains("INT")){//Use SubI instruction
-                        code += "SUBI "+ leftTemp +" "+ rightTemp +" "+ tempName +"\n";
+                        code += "subi "+ rightTemp +" "+ addRegister +"\n";
                         typeName = "INT";
                     } else if(leftObject.type.contains("FLOAT")){//Use SubF instruction
-                        code += "SUBF "+ leftTemp +" "+ rightTemp +" "+ tempName +"\n";
+                        code += "subr "+ rightTemp +" "+ addRegister +"\n";
                         typeName = "FLOAT";
                     }
                 }
-                
                 //Create new Code Object and push up
-                // System.out.println("CREATED CODE:\n" + code);
                 CodeObject AddExpr = new CodeObject(tempName, typeName, code);
                 generatedCode.push(AddExpr);
+            
+            } else if (head.type.contains("MulExpr")){//Mul or div expression
+                //Generate new temp for name
+                String tempName = CreateTemporary();
+                String typeName = "";
+                String code = "";
+                String mulRegister = "";
+                String leftTemp = "[LEFT TEMP NAME]";
+                String rightTemp = "[RIGHT TEMP NAME]";
+
+
+                //Guaranteed two nodes from left and right child to be added
+                CodeObject rightObject = generatedCode.pop();
+                CodeObject leftObject = generatedCode.pop();
+
+                //Left child code generation
+                if(!(Pattern.matches("r[0-9]+", leftObject.temp))){//var reference or literal
+                    mulRegister = tempName;
+                    leftTemp = mulRegister;
+                    code += "move " + leftObject.temp + " " + mulRegister + "\n";
+                } else if(Pattern.matches("r[0-9]+", leftObject.temp)){//expression
+                    //load generated code from expression and add to new code
+                    mulRegister = tempName;
+                    leftTemp = leftObject.temp;
+                    code += leftObject.code + "move " + leftTemp + " " + mulRegister + "\n";
+                }
+
+                //Right child code generation
+                if(!(Pattern.matches("r[0-9]+", rightObject.temp))){//var reference or literal
+                    rightTemp = rightObject.temp;
+                } else if(Pattern.matches("r[0-9]+", rightObject.temp)){//expression
+                    //load generated code from expression and add to new code
+                    rightTemp = rightObject.temp;
+                    code += rightObject.code;
+                }
+                
+                //Finalize mul expr Code generation
+                if(head.type.contains("*")){//use mul instruction variant
+                    if(leftObject.type.contains("INT")){//Use mulI instruction
+                        code += "muli "+ rightTemp +" "+ mulRegister +"\n";
+                        typeName = "INT";
+                    } else if(leftObject.type.contains("FLOAT")){//Use mulF instruction
+                        code += "mulr "+ rightTemp +" "+ mulRegister +"\n";
+                        typeName = "FLOAT";
+                    }
+                } else if(head.type.contains("/")){//Use div instruction variant
+                    if(leftObject.type.contains("INT")){//Use divI instruction
+                        code += "divi "+ rightTemp +" "+ mulRegister +"\n";
+                        typeName = "INT";
+                    } else if(leftObject.type.contains("FLOAT")){//Use divF instruction
+                        code += "divr "+ rightTemp +" "+ mulRegister +"\n";
+                        typeName = "FLOAT";
+                    }
+                }
+                //Create new Code Object and push up
+                CodeObject mulExpr = new CodeObject(tempName, typeName, code);
+                generatedCode.push(mulExpr);
+
+
             } else if (head.type.contains("VarDecl")){//variable declaration
                 String tempName = head.data[0];
                 String typeName = head.data[1];
-                String code = "var "+tempName;
+                String code = "var "+tempName +"\n";
                 CodeObject varObject = new CodeObject(tempName, typeName, code);
                 generatedCode.push(varObject);
+
             } else if(head.type.contains("StringDecl")){//String declaration
                 String strName = head.data[0];
                 String strVal = head.data[1];
-                String code = "str " + strName + " " + strVal;
+                String code = "str " + strName + " " + strVal +"\n";
                 CodeObject strObject = new CodeObject(strName, "STRING", code);
                 generatedCode.push(strObject);
+
             } else if(head.type.contains("WriteExpr")){//write statement
                 String tempName = "WRITE";
                 String typeName = "";
                 String code = "";
                 if(head.data[1].contains("\"")){//write string
                     typeName = "STRING";
-                    code = "sys writes " + head.data[0];
+                    code = "sys writes " + head.data[0] +"\n";
                     CodeObject strObject = new CodeObject(tempName, typeName, code);
                     generatedCode.push(strObject);
                 } else{//float or integer
                     if(head.data[1].contains("INT")){//write int
                         typeName = head.data[1];
-                        code = "sys writei " + head.data[0];
+                        code = "sys writei " + head.data[0] +"\n";
                     } else if(head.data[1].contains("FLOAT")){//write float
                         typeName = head.data[1];
-                        code = "sys writer " + head.data[0];
+                        code = "sys writer " + head.data[0] +"\n";
                     } else{
-                        System.out.println("SOMETHING WACK JUST HAPPENED");
+                        System.out.println("\nunexpected error occurred\n");
                     }
                     CodeObject varObject = new CodeObject(tempName, typeName, code);
                     generatedCode.push(varObject);
                 }
+
+            } else if (head.type.contains("ReadExpr")){//read expression
+                String tempName = "READ";
+                String typeName = "";
+                String code = "";
+                if(head.data[1].contains("INT")){//Read int
+                    typeName = head.data[1];
+                    code = "sys readi " + head.data[0] +"\n";
+                } else if(head.data[1].contains("FLOAT")){//Read Float
+                    typeName = head.data[1];
+                    code = "sys readf " + head.data[0] +"\n";
+                } else {
+                    System.out.println("\nunexpected error occurred\n");
+                }
+                CodeObject readObject = new CodeObject(tempName, typeName, code);
+                generatedCode.push(readObject);
+
+            } else if (head.type.contains("HALT")){//end of program
+                String tempName = "HALT";
+                String typeName = "";
+                String code = "sys halt";
+                CodeObject haltObject = new CodeObject(tempName, typeName, code);
+                generatedCode.push(haltObject);
             }
         }
     }
 
     public static String CreateTemporary(){
         MyLittleListener.tempCounter++;
-        String temporary = "$T" + MyLittleListener.tempCounter;
+        String temporary = "r" + MyLittleListener.tempCounter;
         return temporary;
     }
 }
@@ -322,7 +315,7 @@ class AstNode{
 
 class MyLittleListener extends LittleBaseListener{
     
-    public static int tempCounter = 0;
+    public static int tempCounter = -1;
     Stack<AstNode> nodePool = new Stack<AstNode>();
     LinkedList<AstNode> treeList = new LinkedList<AstNode>();
     // Init new symbole table
@@ -330,18 +323,6 @@ class MyLittleListener extends LittleBaseListener{
     String errorVar = "";
     Stack<LinkedHashMap<String,String>> scopeStack = new Stack<LinkedHashMap<String,String>>();
     LinkedHashMap<String, LinkedHashMap<String,String>> finalTable = new LinkedHashMap<String, LinkedHashMap<String,String>>();
-
-    public LinkedHashMap<String, LinkedHashMap<String, String>> getSymbolTable(){
-        if(this.errorVar.isEmpty()){//check if any declaration errors occurred
-            return this.finalTable;
-        } else {
-            LinkedHashMap<String,String> error = new LinkedHashMap<String,String>();
-            LinkedHashMap<String, LinkedHashMap<String,String>> errorTable = new LinkedHashMap<String, LinkedHashMap<String,String>>();
-            error.put("error", this.errorVar);
-            errorTable.put("DECLARATION ERROR", error);
-            return errorTable;
-        }
-    }
 
     ///////// These functions handle AST generation \\\\\\\\\\\\\\\
     @Override
@@ -373,6 +354,32 @@ class MyLittleListener extends LittleBaseListener{
                 }
             }
 
+        }
+    }
+
+    @Override
+    public void exitRead_stmt(LittleParser.Read_stmtContext ctx){
+        LinkedHashMap<String,String> symbolTable = this.finalTable.get("GLOBAL");
+        //read first variable
+        String varId = ctx.id_list().id().getStart().getText();
+        String varType = symbolTable.get(varId);
+        AstNode readop = new AstNode(null, null, "ReadExpr", new String[] {varId, varType});
+        this.treeList.add(readop);
+        //check for subsequent ids in id_tails()
+        if(ctx.id_list().id_tail().getChildCount() > 0){//more to write
+            LittleParser.Id_tailContext tailCtx = ctx.id_list().id_tail();
+            while(true){
+                varId = tailCtx.id().getStart().getText();
+                varType = symbolTable.get(varId);
+                AstNode nextReadOp = new AstNode(null, null, "ReadExpr", new String[] {varId, varType});
+                this.treeList.add(nextReadOp);
+                if(tailCtx.id_tail().getChildCount() > 0){//more to print
+                    tailCtx = tailCtx.id_tail();
+                } else{//no more to print, break out
+                    break;
+                }
+            }
+            
         }
     }
     
@@ -472,7 +479,6 @@ class MyLittleListener extends LittleBaseListener{
         //Get current symbol table
         LinkedHashMap<String,String> symbolTable = this.finalTable.get("GLOBAL");
         if(ctx.getChildCount() > 0){//Check rule is not empty
-            // System.out.println("\nWe got children\n");
             if(ctx.factor_prefix().getChildCount() > 0){//includes another factor prefix
                 if(ctx.postfix_expr().primary().id() == null){//literal or expression
                     if(ctx.postfix_expr().primary().expr() == null){
@@ -534,8 +540,6 @@ class MyLittleListener extends LittleBaseListener{
                         }
                     } else {//expression
                         AstNode exprNode = this.nodePool.pop();
-                        // System.out.println("Factor > factor_prefix > postfix_expr > primary > expr: ");
-                        // AstNode.Print(exprNode);
                         mulop.Lchild = exprNode;
                         this.nodePool.push(mulop);
                     }
@@ -613,6 +617,10 @@ class MyLittleListener extends LittleBaseListener{
     public void exitProgram(LittleParser.ProgramContext ctx){
         //pop global symbol table from scope stack 
         this.scopeStack.pop();
+
+        //Generate final return AST node
+        AstNode returnNode = new AstNode(null, null, "HALT", null);
+        this.treeList.add(returnNode);
     }
 
 
@@ -690,14 +698,14 @@ class MyLittleListener extends LittleBaseListener{
         if(!(scope.containsKey(varName))){
             scope.put(varName, type);
             AstNode varNode = new AstNode(null, null, "VarDecl", new String[] {varName, type});
-            this.treeList.push(varNode);
+            this.treeList.add(varNode);
             while(commaCtx.getStart().getText().contains(",")){
                 //get next variable id's if any exist and not already declared
                 varName = commaCtx.id().getStart().getText();
                 if(!(scope.containsKey(varName))){
                     scope.put(varName, type);
                     varNode = new AstNode(null, null, "VarDecl", new String[] {varName, type});
-                    this.treeList.push(varNode);
+                    this.treeList.add(varNode);
                     commaCtx = commaCtx.id_tail();
                 } else{//duplicate declaration found
                     if(this.errorVar.isEmpty()){

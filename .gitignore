@@ -10,5 +10,7 @@ LittleBaseListener.java
 
 step2/ANTLR/grep
 
-step3/inputs
-step3/outputs
+step3/inputs/*
+step3/outputs/*
+step4/inputs/*
+step4/outputs/*
